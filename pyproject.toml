@@ -1,0 +1,52 @@
+[project]
+name = "taskmate-bot"
+version = "0.1.0"
+description = "Bilingual WhatsApp task and email invitation assistant"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.13,<2",
+  "celery[redis]>=5.4,<6",
+  "cryptography>=43,<46",
+  "dateparser>=1.2,<2",
+  "email-validator>=2.2,<3",
+  "fastapi>=0.115,<1",
+  "google-api-python-client>=2.150,<3",
+  "google-auth>=2.35,<3",
+  "google-auth-oauthlib>=1.2,<2",
+  "httpx>=0.27,<1",
+  "icalendar>=6,<7",
+  "openai>=1.54,<3",
+  "prometheus-client>=0.21,<1",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic-settings>=2.6,<3",
+  "python-json-logger>=3.2,<4",
+  "redis>=5.2,<6",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "respx>=0.22,<1",
+  "ruff>=0.8,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+extend-ignore = ["B008", "BLE001", "S110"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
