@@ -28,6 +28,7 @@ TaskMate — WhatsApp-бот для ведения задач, напомина�
 ```text
 Напомни завтра в 15:00 позвонить врачу
 Добавь сдать отчёт в следующий понедельник в 3 часа дня
+Добавь завтра встречу с администратором в час дня напомни за 4 часа это важно
 Создай задачу купить батарейки без срока
 Добавь важно оплатить налог в пятницу в 10:30
 ```
@@ -364,4 +365,3 @@ docker compose exec db sh /backup/backup.sh
 | `GET/POST` | `/webhooks/whatsapp` | Meta webhook |
 | `POST` | `/webhooks/gmail` | Pub/Sub push |
 | `POST` | `/internal/gmail/watch` | регистрация Gmail watch |
-

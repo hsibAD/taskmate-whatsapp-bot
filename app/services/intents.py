@@ -6,6 +6,7 @@ from openai import OpenAI
 from app.config import Settings
 from app.models import Priority
 from app.schemas import Intent
+from app.services.reminders import parse_reminder_minutes
 
 
 class IntentParser(ABC):
@@ -72,6 +73,37 @@ class RuleIntentParser(IntentParser):
         if create:
             body = create.group(1).strip()
             body = re.sub(r"^(?:мне|me)\s+", "", body, flags=re.IGNORECASE)
+            priority = (
+                Priority.LOW
+                if re.search(
+                    r"\b(?:неважно|низк(?:ий|ого)\s+приоритет|low\s+priority)\b",
+                    body,
+                    re.IGNORECASE,
+                )
+                else Priority.HIGH
+                if re.search(
+                    r"\b(?:это\s+)?(?:важно|срочно|high\s+priority|urgent)\b", body, re.IGNORECASE
+                )
+                else Priority.NORMAL
+            )
+            body = re.sub(
+                r"\s*\b(?:это\s+)?(?:важно|срочно|неважно|"
+                r"низк(?:ий|ого)\s+приоритет|high\s+priority|low\s+priority|urgent)\b\s*",
+                " ",
+                body,
+                flags=re.IGNORECASE,
+            ).strip()
+            reminder_match = re.search(
+                r"\s*\b(?:напомни|предупреди|remind)(?:\s+мне)?\s+"
+                r"(.+?)(?=$|\s+\b(?:это\s+)?(?:важно|срочно|неважно)\b)",
+                body,
+                re.IGNORECASE,
+            )
+            reminders = None
+            if reminder_match:
+                parsed_reminders = parse_reminder_minutes(reminder_match.group(1))
+                reminders = parsed_reminders if parsed_reminders else None
+                body = (body[: reminder_match.start()] + body[reminder_match.end() :]).strip()
             no_due = bool(
                 re.search(
                     r"(?:\s+|^)(?:без\s+(?:срока|даты)|no\s+(?:due\s+date|deadline))\s*$",
@@ -98,6 +130,11 @@ class RuleIntentParser(IntentParser):
                 body,
                 re.IGNORECASE,
             )
+            natural_hour = (
+                r"(?:[01]?\d|2[0-3])(?:[.:][0-5]\d)?"
+                r"(?:\s*(?:час(?:а|ов)?|am|pm|утра|дня|вечера|ночи))?"
+                r"|час\s+(?:утра|дня|вечера|ночи)"
+            )
             temporal = re.search(
                 r"\b(?:сегодня|завтра|послезавтра|today|tomorrow|"
                 r"(?:в\s+)?(?:следующ(?:ий|ую|ее)|next)\s+"
@@ -113,31 +150,42 @@ class RuleIntentParser(IntentParser):
                 when_text = f"в {time_first.group(1)}"
                 title = time_first.group(2).strip(" ,")
             elif leading_relative:
+                remainder = leading_relative.group(2).strip()
+                time_in_remainder = re.search(
+                    rf"\bв\s+({natural_hour})\b",
+                    remainder,
+                    re.IGNORECASE,
+                )
                 when_text = leading_relative.group(1)
-                title = leading_relative.group(2).strip(" ,")
+                if time_in_remainder:
+                    when_text += f" в {time_in_remainder.group(1)}"
+                    title = (
+                        remainder[: time_in_remainder.start()]
+                        + remainder[time_in_remainder.end() :]
+                    ).strip(" ,")
+                else:
+                    title = remainder.strip(" ,")
             else:
                 when_text = temporal.group(0).strip() if temporal else None
                 title = body[: temporal.start()].strip(" ,") if temporal else body
-            priority = (
-                Priority.HIGH
-                if any(x in lower for x in ("важно", "urgent", "high"))
-                else (
-                    Priority.LOW if any(x in lower for x in ("неважно", "low")) else Priority.NORMAL
-                )
-            )
             return Intent(
                 action="create",
                 title=title,
                 when_text=when_text,
                 no_due=no_due,
                 priority=priority,
+                reminders=reminders,
             )
         return Intent(action="help")
 
 
 class OpenAIIntentParser(IntentParser):
     def __init__(self, settings: Settings):
-        self.client = OpenAI(api_key=settings.openai_api_key.get_secret_value())
+        self.client = OpenAI(
+            api_key=settings.openai_api_key.get_secret_value(),
+            max_retries=0,
+            timeout=5,
+        )
         self.model = settings.openai_model
 
     def parse(self, text: str, language: str, timezone: str) -> Intent:
@@ -164,9 +212,12 @@ class CompositeIntentParser(IntentParser):
         )
 
     def parse(self, text: str, language: str, timezone: str) -> Intent:
+        rule_intent = self.rules.parse(text, language, timezone)
+        if rule_intent.action != "help":
+            return rule_intent
         if self.llm:
             try:
                 return self.llm.parse(text, language, timezone)
             except Exception:
                 pass
-        return self.rules.parse(text, language, timezone)
+        return rule_intent

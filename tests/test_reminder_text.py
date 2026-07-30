@@ -1,4 +1,5 @@
-from app.services.bot import BotService, parse_reminder_minutes
+from app.services.bot import BotService
+from app.services.reminders import parse_reminder_minutes
 
 
 def test_natural_reminder_intervals():

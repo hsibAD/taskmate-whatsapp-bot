@@ -18,6 +18,7 @@ from app.schemas import Intent, ParsedEvent
 from app.services.email_events import confirm_email_event, stage_email_event
 from app.services.intents import IntentParser
 from app.services.onboarding import begin_email_verification, confirm_email, onboarding_reply
+from app.services.reminders import parse_reminder_minutes
 from app.services.tasks import complete_task, create_task, find_tasks, reschedule_task, summary
 from app.services.time import (
     TimeParseError,
@@ -26,70 +27,6 @@ from app.services.time import (
     parse_future_datetime,
     validate_timezone,
 )
-
-
-def parse_reminder_minutes(text: str) -> list[int] | None:
-    lowered = text.casefold().strip()
-    lowered = re.sub(r"\bпол\s+часа\b", "полчаса", lowered)
-    if lowered in {"по умолчанию", "default", "ок", "ok"}:
-        return None
-    if lowered in {
-        "в момент события",
-        "в момент задачи",
-        "точно в срок",
-        "только в момент события",
-        "только в момент задачи",
-        "at the event time",
-        "at due time",
-    }:
-        return [0]
-    units = {
-        "минут": 1,
-        "минуты": 1,
-        "минуту": 1,
-        "minute": 1,
-        "minutes": 1,
-        "час": 60,
-        "часа": 60,
-        "часов": 60,
-        "hour": 60,
-        "hours": 60,
-        "день": 1440,
-        "дня": 1440,
-        "дней": 1440,
-        "day": 1440,
-        "days": 1440,
-    }
-    word_numbers = {
-        "полчаса": 30,
-        "час": 60,
-        "день": 1440,
-        "one hour": 60,
-        "one day": 1440,
-    }
-    values: list[int] = []
-    fractional_patterns = {
-        r"\bполтора\s+часа\b": 90,
-        r"\bчас\s+с\s+половиной\b": 90,
-        r"\bполтора\s+дня\b": 2160,
-        r"\bone\s+and\s+a\s+half\s+hours?\b": 90,
-        r"\ban\s+hour\s+and\s+a\s+half\b": 90,
-    }
-    for pattern, minutes in fractional_patterns.items():
-        if re.search(pattern, lowered):
-            values.append(minutes)
-            lowered = re.sub(pattern, " ", lowered)
-    values.extend(
-        minutes
-        for phrase, minutes in word_numbers.items()
-        if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", lowered)
-    )
-    for number, unit in re.findall(
-        r"(\d+)\s*(минут(?:у|ы)?|час(?:а|ов)?|д(?:ень|ня|ней)|minutes?|hours?|days?)",
-        lowered,
-    ):
-        values.append(int(number) * units[unit])
-    return sorted(set(values), reverse=True) if values else []
 
 
 class BotService:
@@ -113,6 +50,17 @@ class BotService:
             return reply or "RU / EN"
 
         state = db.get(ConversationState, user.id)
+        starts_new_command = bool(
+            re.match(
+                r"^\s*(?:добавь|создай|напомни\s+мне|add|create|remind\s+me)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
+        if state and starts_new_command:
+            db.delete(state)
+            db.flush()
+            state = None
         capability_phrases = {
             "help",
             "помощь",
@@ -184,9 +132,7 @@ class BotService:
         if timezone_match:
             requested_timezone = timezone_match.group(1)
             if not requested_timezone:
-                db.merge(
-                    ConversationState(user_id=user.id, state="change_timezone", payload={})
-                )
+                db.merge(ConversationState(user_id=user.id, state="change_timezone", payload={}))
                 db.commit()
                 return (
                     "Укажите новый часовой пояс, например Europe/Paris или Asia/Tokyo. "
@@ -207,9 +153,7 @@ class BotService:
         if replace_email_match:
             requested_email = replace_email_match.group(1)
             if not requested_email:
-                db.merge(
-                    ConversationState(user_id=user.id, state="change_email", payload={})
-                )
+                db.merge(ConversationState(user_id=user.id, state="change_email", payload={}))
                 db.commit()
                 return (
                     "Напишите новый адрес почты. После подтверждения он заменит текущую почту."
@@ -293,11 +237,7 @@ class BotService:
         if state.state == "new_task_title":
             title = text.strip()
             if not title:
-                return (
-                    "Напишите, как называется задача."
-                    if ru
-                    else "Tell me the task name."
-                )
+                return "Напишите, как называется задача." if ru else "Tell me the task name."
             state.state = "new_task_due"
             state.payload = Intent(action="create", title=title).model_dump(mode="json")
             return (
@@ -356,11 +296,7 @@ class BotService:
             record = db.get(InboundEmail, payload["email_id"])
             if not record:
                 db.delete(state)
-                return (
-                    "Письмо больше недоступно."
-                    if ru
-                    else "The email is no longer available."
-                )
+                return "Письмо больше недоступно." if ru else "The email is no longer available."
             extracted = record.extracted or {}
             event = ParsedEvent(
                 title=extracted.get("title") or record.subject or "Событие из письма",
@@ -369,9 +305,7 @@ class BotService:
                 confidence=0.8,
             )
             _, _, prompt = stage_email_event(db, record, user, event)
-            return prompt or (
-                "Данные события сохранены." if ru else "Event details were saved."
-            )
+            return prompt or ("Данные события сохранены." if ru else "Event details were saved.")
         if state.state == "email_event_reminders":
             task = db.get(Task, state.payload["task_id"])
             minutes = parse_reminder_minutes(text)
@@ -517,9 +451,18 @@ class BotService:
                 )
             task = create_task(db, user, intent)
             return (
-                f"Создано: {task.title} — {format_local(task.due_at, user.timezone, 'ru')}"
+                f"Готово! Создано: {task.title} — "
+                f"{format_local(task.due_at, task.timezone, 'ru')}.\n"
+                f"Приоритет: "
+                f"{'🔴 высокий' if task.priority == Priority.HIGH else '🟢 низкий' if task.priority == Priority.LOW else '🟡 обычный'}.\n"
+                f"Напоминания: "
+                f"{self._format_reminder_intervals(intent.reminders or user.default_reminders, True, False)}."
                 if ru
-                else f"Created: {task.title} — {format_local(task.due_at, user.timezone, 'en')}"
+                else f"Done! Created: {task.title} — "
+                f"{format_local(task.due_at, task.timezone, 'en')}.\n"
+                f"Priority: {task.priority.value}.\n"
+                f"Reminders: "
+                f"{self._format_reminder_intervals(intent.reminders or user.default_reminders, False, False)}."
             )
         if intent.action == "summary":
             return summary(db, user, intent.period or "day")
@@ -703,9 +646,7 @@ class BotService:
         )
         if ru:
             account = (
-                "Ваша подтверждённая почта: "
-                + ", ".join(record.email for record in emails)
-                + "."
+                "Ваша подтверждённая почта: " + ", ".join(record.email for record in emails) + "."
                 if emails
                 else "У вас пока нет подтверждённой почты. Чтобы зарегистрировать её, "
                 "напишите: «Моя почта: name@example.com»."
@@ -720,8 +661,7 @@ class BotService:
                 "4. Можно переслать обычное приглашение с датой и временем в тексте. "
                 "Файл ICS полезен, но необязателен.\n"
                 "5. Я пришлю найденные данные в WhatsApp и попрошу подтвердить добавление. "
-                "Если даты или времени не хватает, уточню их здесь.\n\n"
-                + account
+                "Если даты или времени не хватает, уточню их здесь.\n\n" + account
             )
         account = (
             "Your verified email: " + ", ".join(record.email for record in emails) + "."
@@ -737,14 +677,11 @@ class BotService:
             "“Client meeting August 3 at 3 pm”.\n"
             "4. A normal invitation in the email body works too. ICS is helpful but optional.\n"
             "5. I will show the extracted details in WhatsApp and ask for confirmation. "
-            "If something is missing, I will ask here.\n\n"
-            + account
+            "If something is missing, I will ask here.\n\n" + account
         )
 
     @staticmethod
-    def _format_reminder_intervals(
-        minutes: list[int], ru: bool, event: bool = True
-    ) -> str:
+    def _format_reminder_intervals(minutes: list[int], ru: bool, event: bool = True) -> str:
         def ru_form(amount: int, one: str, few: str, many: str) -> str:
             if amount % 10 == 1 and amount % 100 != 11:
                 word = one
@@ -790,9 +727,7 @@ class BotService:
                 else f"{value} minute{'s' if value != 1 else ''} before"
             )
 
-        values = [
-            format_one(value) for value in sorted(set(minutes) | {0}, reverse=True)
-        ]
+        values = [format_one(value) for value in sorted(set(minutes) | {0}, reverse=True)]
         if len(values) == 1:
             return values[0]
         conjunction = " и " if ru else " and "

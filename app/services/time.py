@@ -20,6 +20,8 @@ def has_explicit_time(text: str) -> bool:
     lowered = text.casefold()
     if re.search(r"\b(?:полдень|полночь|noon|midnight)\b", lowered):
         return True
+    if re.search(r"\bв\s+час\s+(?:утра|дня|вечера|ночи)\b", lowered):
+        return True
     return bool(
         re.search(
             r"(?:\bв\s+|\bat\s+)(?:[01]?\d|2[0-3])(?:[.:][0-5]\d)?"
@@ -33,6 +35,10 @@ def has_explicit_time(text: str) -> bool:
 
 def normalize_time_phrases(text: str) -> str:
     value = text.casefold()
+    value = re.sub(r"\bчас\s+дня\b", "1 pm", value)
+    value = re.sub(r"\bчас\s+вечера\b", "1 pm", value)
+    value = re.sub(r"\bчас\s+утра\b", "1 am", value)
+    value = re.sub(r"\bчас\s+ночи\b", "1 am", value)
     value = re.sub(r"\b(\d{1,2})\s*час(?:а|ов)?\s*дня\b", r"\1 pm", value)
     value = re.sub(r"\b(\d{1,2})\s*час(?:а|ов)?\s*вечера\b", r"\1 pm", value)
     value = re.sub(r"\b(\d{1,2})\s*час(?:а|ов)?\s*утра\b", r"\1 am", value)

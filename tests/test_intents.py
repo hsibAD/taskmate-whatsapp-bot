@@ -1,3 +1,4 @@
+from app.models import Priority
 from app.services.intents import RuleIntentParser
 
 
@@ -43,3 +44,16 @@ def test_rule_parser_relative_reschedule():
     assert intent.action == "reschedule"
     assert intent.task_ref == "позвонить Кале"
     assert intent.when_text == "час позже"
+
+
+def test_full_natural_task_with_time_reminder_and_priority():
+    intent = RuleIntentParser().parse(
+        "Добавь Завтра встреча с администратором в час дня напомни за 4 часа это важно",
+        "ru",
+        "Asia/Almaty",
+    )
+    assert intent.action == "create"
+    assert intent.title == "встреча с администратором"
+    assert intent.when_text == "Завтра в час дня"
+    assert intent.reminders == [240]
+    assert intent.priority == Priority.HIGH
