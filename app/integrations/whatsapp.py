@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import time
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -146,15 +147,28 @@ class WhatsAppClient:
     def _post(self, payload: dict) -> dict:
         if not self.settings.meta_phone_number_id:
             return {"dry_run": True, "payload": payload}
-        response = httpx.post(
+        url = (
             f"https://graph.facebook.com/{self.settings.meta_api_version}/"
-            f"{self.settings.meta_phone_number_id}/messages",
-            headers={
-                "Authorization": f"Bearer {self.settings.meta_access_token.get_secret_value()}"
-            },
-            json=payload,
-            timeout=15,
+            f"{self.settings.meta_phone_number_id}/messages"
         )
+        headers = {
+            "Authorization": f"Bearer {self.settings.meta_access_token.get_secret_value()}"
+        }
+        response = None
+        for attempt in range(3):
+            try:
+                response = httpx.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=httpx.Timeout(15, connect=10),
+                )
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if attempt == 2:
+                    raise
+                time.sleep(0.5 * (2**attempt))
+        assert response is not None
         payload = response.json()
         if response.is_error:
             raise WhatsAppAPIError(response.status_code, payload)

@@ -1,5 +1,8 @@
 import hashlib
 import hmac
+from unittest.mock import patch
+
+import httpx
 
 from app.config import Settings
 from app.integrations.whatsapp import WhatsAppClient, extract_messages
@@ -62,3 +65,32 @@ def test_extract_whatsapp_button_reply():
     assert extract_messages(payload) == [
         ("15551234567", "__menu_add_task__", "wamid.button")
     ]
+
+
+def test_whatsapp_retries_tls_connect_timeout():
+    settings = Settings(
+        _env_file=None,
+        meta_phone_number_id="123",
+        meta_access_token="token",
+    )
+    client = WhatsAppClient(settings)
+    request = httpx.Request("POST", "https://graph.facebook.com")
+    success = httpx.Response(
+        200,
+        request=request,
+        json={"messages": [{"id": "wamid.test"}]},
+    )
+    with (
+        patch(
+            "app.integrations.whatsapp.httpx.post",
+            side_effect=[
+                httpx.ConnectTimeout("TLS timeout", request=request),
+                success,
+            ],
+        ) as post,
+        patch("app.integrations.whatsapp.time.sleep"),
+    ):
+        result = client.send_text("15551234567", "test")
+
+    assert result["messages"][0]["id"] == "wamid.test"
+    assert post.call_count == 2
