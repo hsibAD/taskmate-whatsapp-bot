@@ -35,6 +35,13 @@ class WhatsAppAPIError(RuntimeError):
 class WhatsAppClient:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.client = httpx.Client(
+            timeout=httpx.Timeout(15, connect=10),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+    def close(self) -> None:
+        self.client.close()
 
     def verify_signature(self, body: bytes, signature: str | None) -> bool:
         if not signature or not signature.startswith("sha256="):
@@ -157,11 +164,10 @@ class WhatsAppClient:
         response = None
         for attempt in range(3):
             try:
-                response = httpx.post(
+                response = self.client.post(
                     url,
                     headers=headers,
                     json=payload,
-                    timeout=httpx.Timeout(15, connect=10),
                 )
                 break
             except (httpx.ConnectError, httpx.ConnectTimeout):

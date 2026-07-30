@@ -82,7 +82,7 @@ def test_whatsapp_retries_tls_connect_timeout():
     )
     with (
         patch(
-            "app.integrations.whatsapp.httpx.post",
+            "app.integrations.whatsapp.httpx.Client.post",
             side_effect=[
                 httpx.ConnectTimeout("TLS timeout", request=request),
                 success,

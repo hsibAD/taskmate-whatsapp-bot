@@ -43,7 +43,18 @@ class RuleIntentParser(IntentParser):
                 else ("week" if any(x in lower for x in ("недел", "week")) else "day")
             )
             return Intent(action="summary", period=period)
-        if lower in {"задачи", "список", "list", "tasks"}:
+        if lower in {
+            "задачи",
+            "мои задачи",
+            "покажи задачи",
+            "покажи мои задачи",
+            "список",
+            "список задач",
+            "list",
+            "tasks",
+            "my tasks",
+            "show my tasks",
+        }:
             return Intent(action="list")
 
         action_patterns = [

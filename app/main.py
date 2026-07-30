@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
     app.state.whatsapp = WhatsAppClient(settings)
     app.state.bot = BotService(settings, CompositeIntentParser(settings))
     yield
+    app.state.whatsapp.close()
 
 
 app = FastAPI(title="TaskMate Bot", version="0.1.0", lifespan=lifespan)
@@ -84,6 +86,7 @@ async def whatsapp_webhook(
         raise HTTPException(status_code=401, detail="invalid signature")
     payload = json.loads(body)
     for sender, message, event_id in extract_messages(payload):
+        started_at = time.monotonic()
         if db.get(WebhookEvent, {"provider": "whatsapp", "event_id": event_id}):
             continue
         db.add(WebhookEvent(provider="whatsapp", event_id=event_id))
@@ -98,6 +101,11 @@ async def whatsapp_webhook(
             else:
                 request.app.state.whatsapp.send_text(sender, reply)
             webhooks_total.labels("whatsapp", "processed").inc()
+            logger.info(
+                "WhatsApp message processed event=%s duration_ms=%d",
+                event_id,
+                (time.monotonic() - started_at) * 1000,
+            )
         except Exception:
             # The inbound event is valid and must be acknowledged even when the
             # outbound Graph API is temporarily unavailable. Meta retries 5xx

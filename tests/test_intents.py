@@ -57,3 +57,9 @@ def test_full_natural_task_with_time_reminder_and_priority():
     assert intent.when_text == "Завтра в час дня"
     assert intent.reminders == [240]
     assert intent.priority == Priority.HIGH
+
+
+def test_my_tasks_is_a_fast_list_command():
+    intent = RuleIntentParser().parse("Мои задачи", "ru", "Asia/Almaty")
+
+    assert intent.action == "list"
